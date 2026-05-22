@@ -1,0 +1,17 @@
+{
+  "name": "klinekraft-proofs",
+  "version": "1.0.0",
+  "description": "Klinekraft Proof Preview - PDF flipbook viewer for real estate proofs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
