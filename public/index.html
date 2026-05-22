@@ -943,6 +943,7 @@ async function loadPdfFromArrayBuffer(buf, name) {
   landing.classList.add('hidden');
   showLoading();
   setLoading(5, 'OPENING');
+  updateShareButton();
 
   try {
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -1051,11 +1052,24 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── Topbar actions ────────────────────────────────────────────────
+function getShareUrl() {
+  if (!currentPdfUrl) return null;
+  return window.location.origin + '/?pdf=' + encodeURIComponent(currentPdfUrl);
+}
+
+function updateShareButton() {
+  $('btn-share').disabled = !currentPdfUrl;
+}
+
 $('btn-share').addEventListener('click', async () => {
-  const url = window.location.href;
+  const url = getShareUrl();
+  if (!url) {
+    showToast('Local PDF — upload at /upload to get a share link');
+    return;
+  }
   try {
     await navigator.clipboard.writeText(url);
-    showToast('Link copied to clipboard');
+    showToast('Flipbook link copied to clipboard');
   } catch {
     showToast('Could not copy link');
   }
@@ -1105,6 +1119,7 @@ $('btn-close').addEventListener('click', () => {
   pdfDoc = null;
   currentPdfBytes = null;
   currentPdfUrl = null;
+  updateShareButton();
   flipbookEl.innerHTML = '';
   thumbsEl.innerHTML = '';
   docTitleEl.textContent = '';
@@ -1137,6 +1152,7 @@ window.addEventListener('resize', () => {
 
 // ─── Initial load from ?pdf=URL query param ─────────────────────────
 (function checkUrlParam() {
+  updateShareButton();
   const params = new URLSearchParams(window.location.search);
   const pdfUrl = params.get('pdf');
   if (pdfUrl) {
