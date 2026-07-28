@@ -561,7 +561,7 @@
     <div class="landing-logo" id="landing-logo"></div>
     <div class="landing-eyebrow">Proof Preview</div>
     <h1 class="landing-title">Review your booklet, <em>page by page.</em></h1>
-    <p class="landing-sub">Drop a PDF below to preview as a flipbook. Built for design proofs, agent reviews, and final approvals.</p>
+    <p class="landing-sub">Drop a PDF below to preview as a flipbook. We'll host it in the background so you can copy a share link for the agent.</p>
 
     <label for="file-input" class="dropzone" id="dropzone">
       <div class="dropzone-label">
@@ -698,6 +698,8 @@ let pageHeight = 0;          // base page height in pt (from first page)
 let currentPdfUrl = null;    // for download/share (hosted)
 let currentPdfBytes = null;  // for download (local file)
 let currentPdfName = 'document.pdf';
+let uploadState = 'idle';    // 'idle' | 'uploading' | 'done' | 'failed'
+let uploadProgress = 0;
 
 // ─── DOM refs ──────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -992,13 +994,13 @@ function handleLocalFile(file) {
     showToast('Please drop a PDF file');
     return;
   }
-  currentPdfUrl = null; // local file, no shareable URL
+  currentPdfUrl = null;
+  uploadState = 'idle';
+  uploadProgress = 0;
   dropzone.classList.add('busy');
   const reader = new FileReader();
   reader.onload = e => {
     loadPdfFromArrayBuffer(e.target.result, file.name);
-    // dropzone state doesn't really matter once landing is hidden,
-    // but reset it for the case where loading errors and landing returns.
     dropzone.classList.remove('busy');
   };
   reader.onerror = () => {
@@ -1006,6 +1008,9 @@ function handleLocalFile(file) {
     showToast('Could not read this file');
   };
   reader.readAsArrayBuffer(file);
+
+  // Host the PDF in parallel so the share button has a link.
+  uploadPdfToBlob(file);
 }
 
 // ─── Event wiring ──────────────────────────────────────────────────
@@ -1051,6 +1056,62 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ─── Background upload to Vercel Blob ──────────────────────────────
+// When the user drops a PDF locally we host it in the background so the
+// share button has something to share. The flipbook renders in parallel.
+let blobClientPromise = null;
+function ensureBlobClientLoaded() {
+  if (typeof window.vercelBlobUpload === 'function') return Promise.resolve();
+  if (blobClientPromise) return blobClientPromise;
+  blobClientPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/vercel-blob-client.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load upload client'));
+    document.head.appendChild(s);
+  });
+  return blobClientPromise;
+}
+
+async function uploadPdfToBlob(file) {
+  uploadState = 'uploading';
+  uploadProgress = 0;
+  updateShareButton();
+
+  try {
+    await ensureBlobClientLoaded();
+    if (typeof window.vercelBlobUpload !== 'function') {
+      throw new Error('Upload client failed to initialize');
+    }
+    const result = await window.vercelBlobUpload(file.name, file, {
+      access: 'public',
+      handleUploadUrl: '/api/upload',
+      contentType: 'application/pdf',
+      onUploadProgress: ev => {
+        if (ev && typeof ev.percentage === 'number') {
+          uploadProgress = Math.round(ev.percentage);
+          updateShareButton();
+        }
+      },
+    });
+    currentPdfUrl = result.url;
+    uploadState = 'done';
+    updateShareButton();
+    // Reflect the hosted URL in the address bar so a refresh keeps the link.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      params.set('pdf', currentPdfUrl);
+      window.history.replaceState({}, '', '?' + params.toString());
+    } catch (e) {}
+    showToast('Share link ready');
+  } catch (err) {
+    console.error('Upload failed:', err);
+    uploadState = 'failed';
+    updateShareButton();
+    showToast('Hosting failed — share link unavailable');
+  }
+}
+
 // ─── Topbar actions ────────────────────────────────────────────────
 function getShareUrl() {
   if (!currentPdfUrl) return null;
@@ -1058,18 +1119,39 @@ function getShareUrl() {
 }
 
 function updateShareButton() {
-  $('btn-share').disabled = !currentPdfUrl;
+  const btn = $('btn-share');
+  if (uploadState === 'uploading') {
+    btn.disabled = false;
+    btn.title = `Hosting · ${uploadProgress}%`;
+  } else if (currentPdfUrl) {
+    btn.disabled = false;
+    btn.title = 'Copy share link';
+  } else if (uploadState === 'failed') {
+    btn.disabled = false;
+    btn.title = 'Hosting failed';
+  } else {
+    btn.disabled = true;
+    btn.title = 'No PDF loaded';
+  }
 }
 
 $('btn-share').addEventListener('click', async () => {
+  if (uploadState === 'uploading') {
+    showToast(`Hosting your booklet · ${uploadProgress}%`);
+    return;
+  }
+  if (uploadState === 'failed') {
+    showToast('Hosting failed — reload and try again');
+    return;
+  }
   const url = getShareUrl();
   if (!url) {
-    showToast('Local PDF — upload at /upload to get a share link');
+    showToast('No PDF loaded');
     return;
   }
   try {
     await navigator.clipboard.writeText(url);
-    showToast('Flipbook link copied to clipboard');
+    showToast('Flipbook link copied');
   } catch {
     showToast('Could not copy link');
   }
@@ -1119,7 +1201,11 @@ $('btn-close').addEventListener('click', () => {
   pdfDoc = null;
   currentPdfBytes = null;
   currentPdfUrl = null;
+  uploadState = 'idle';
+  uploadProgress = 0;
   updateShareButton();
+  // Clear the ?pdf= param from the URL bar
+  try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
   flipbookEl.innerHTML = '';
   thumbsEl.innerHTML = '';
   docTitleEl.textContent = '';
