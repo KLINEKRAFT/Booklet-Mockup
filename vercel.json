@@ -5,6 +5,9 @@
   "framework": null,
   "cleanUrls": true,
   "trailingSlash": false,
+  "redirects": [
+    { "source": "/upload", "destination": "/", "permanent": false }
+  ],
   "headers": [
     {
       "source": "/(.*)",

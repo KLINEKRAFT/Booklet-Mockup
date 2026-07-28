@@ -8,8 +8,7 @@ Branded with Klinekraft, built in the Dieter Rams minimalist tradition.
 ```
 .
 ├── public/
-│   ├── index.html              ← the flipbook viewer (the "proof preview")
-│   ├── upload.html             ← internal upload tool (password-protected)
+│   ├── index.html              ← the flipbook viewer + uploader
 │   └── vercel-blob-client.js   ← pre-bundled Vercel Blob client SDK
 ├── api/
 │   └── upload.js               ← serverless function that hands out upload tokens
@@ -20,17 +19,18 @@ Branded with Klinekraft, built in the Dieter Rams minimalist tradition.
 
 ## How it works
 
-There are two pages:
+One page does everything. Drop a PDF on `/`, the flipbook renders
+immediately from your local copy while the file uploads to Vercel Blob
+in the background. As soon as the upload finishes, the share button
+copies a permanent flipbook link you can send to anyone.
 
-1. **`/`** — the public flipbook viewer. Accepts a PDF either dropped locally
-   in the browser, or via a `?pdf=<URL>` query parameter (the hosted-share mode).
-2. **`/upload`** — an internal, password-protected page where you upload a PDF
-   to Vercel Blob and get back a shareable flipbook link. This is the page
-   you'll use day-to-day.
+Recipients open the link and get the same flipbook view — no account,
+no password, no install. The viewer also handles `?pdf=<URL>` directly,
+so any hosted PDF can be wrapped as a flipbook.
 
-The upload flow streams the PDF directly from the browser to Vercel Blob
-storage — it never passes through the serverless function, which means
-booklets of any size (up to 100 MB by default) can be uploaded.
+The upload streams the PDF directly from the browser to Blob storage —
+it never passes through the serverless function, which means booklets
+up to 100 MB are supported.
 
 ## One-time setup
 
@@ -64,18 +64,7 @@ In the Vercel dashboard:
 This creates an environment variable called `BLOB_READ_WRITE_TOKEN` on
 your project automatically — that's what the upload function uses.
 
-### 3. Set the upload password
-
-In the Vercel dashboard:
-
-1. Open your project → **Settings** → **Environment Variables**
-2. Add a new variable:
-   - Name: `UPLOAD_PASSWORD`
-   - Value: pick anything you want, e.g. `klinekraft2026`
-   - Environments: Production, Preview, Development (check all three)
-3. Save.
-
-### 4. Redeploy so the env var takes effect
+### 3. Redeploy
 
 ```bash
 vercel --prod
@@ -85,17 +74,19 @@ Done. You're live.
 
 ## Daily usage
 
-1. Go to `https://your-deployment.vercel.app/upload`
-2. Enter your password, drop a PDF, click **Upload & create link**
-3. Copy the link that comes back — it looks like:
+1. Export your booklet from InDesign as a PDF.
+2. Open `https://your-deployment.vercel.app/`.
+3. Drop the PDF onto the page. The flipbook appears right away.
+4. Wait a few seconds for "Share link ready" — click the share icon
+   in the top bar to copy a link like:
    ```
    https://your-deployment.vercel.app/?pdf=https://blob.vercel-storage.com/Barron_Fork_Ranch-aB3xY.pdf
    ```
-4. Send that link to your agent. They click it, the flipbook opens.
+5. Send that link to your agent.
 
-The agent doesn't need an account, password, or anything else. They get a
-clean, branded, mobile-friendly preview with page-curl animation, thumbnails,
-zoom, fullscreen, and a PDF download button.
+The agent clicks the link, the flipbook opens. Clean, branded,
+mobile-friendly. Page-curl animation, thumbnails, zoom, fullscreen,
+and a PDF download button.
 
 ## Features (viewer)
 
@@ -105,7 +96,7 @@ zoom, fullscreen, and a PDF download button.
 - Thumbnail strip with click-to-jump
 - Fullscreen mode
 - Per-page zoom overlay
-- Share link copy button
+- Share link copy button (auto-hosted on drop)
 - Original PDF download
 - Keyboard arrows (← / →) for navigation
 
@@ -132,31 +123,33 @@ The change is live in ~20 seconds.
 
 ## Tech notes
 
-- **No build step.** The viewer (`public/index.html`) and upload page
-  (`public/upload.html`) are plain HTML/CSS/JS, loaded straight from the CDN.
-  The only "built" file is `public/vercel-blob-client.js`, which is the
-  Vercel Blob client SDK pre-bundled for browsers (since it's published as
-  ESM-only on npm).
+- **No build step.** `public/index.html` is plain HTML/CSS/JS, loaded
+  straight from the CDN. The only "built" file is
+  `public/vercel-blob-client.js`, which is the Vercel Blob client SDK
+  pre-bundled for browsers (since it's published as ESM-only on npm).
+- The blob client is loaded **on demand** — only fetched when someone
+  drops a PDF, so recipients viewing a share link don't pay the cost.
+- **No password gate.** Anyone who lands on `/` can upload a PDF. Keep
+  the deployment URL private (or behind a custom domain you don't
+  advertise) if that matters. Uploads are restricted to `application/pdf`
+  and capped at 100 MB.
 - **Libraries used:**
   - [PDF.js 3.11.174](https://github.com/mozilla/pdf.js) (via cdnjs) —
     renders each PDF page to canvas.
   - [StPageFlip 2.0.7](https://github.com/Nodlik/StPageFlip) (via jsDelivr) —
     realistic page-turning animation. MIT licensed, no dependencies.
   - [@vercel/blob 2.4.0](https://www.npmjs.com/package/@vercel/blob) —
-    only used inside `api/upload.js` (server-side) and the pre-bundled
-    `vercel-blob-client.js` (browser-side, for the upload page only).
-
+    used inside `api/upload.js` (server-side) and `vercel-blob-client.js`
+    (browser-side, for hosting dropped PDFs).
 - **Brand colors:** Forest green `#155742` (from your logo), warm off-white
   `#F5F2EC`. The viewer uses Inter Tight for UI and Fraunces for accents.
 
 ## Troubleshooting
 
-**"Incorrect password" when uploading.** Make sure you added
-`UPLOAD_PASSWORD` to Vercel env vars *and* redeployed afterward.
-Env-var changes don't take effect on existing deployments.
-
-**"UPLOAD_PASSWORD is not set on the server."** Same fix — you missed
-step 3 or step 4 of the setup.
+**Share button says "Hosting failed".** The blob upload didn't go
+through. Most common cause: `BLOB_READ_WRITE_TOKEN` isn't set on the
+deployment. Confirm the Blob store is connected to the project in the
+Vercel dashboard, then redeploy.
 
 **PDFs over 100 MB rejected.** Edit `maximumSizeInBytes` in
 `api/upload.js`. Vercel Blob itself supports up to 5 GB per file.
